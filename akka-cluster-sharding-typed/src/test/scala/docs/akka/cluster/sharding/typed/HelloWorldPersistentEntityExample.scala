@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 
 import akka.actor.typed.ActorRef
 import akka.actor.typed.ActorSystem
+import akka.persistence.typed.scaladsl.EventSourcedBehavior
 import akka.serialization.jackson.CborSerializable
 
 object HelloWorldPersistentEntityExample {
@@ -21,18 +22,16 @@ object HelloWorldPersistentEntityExample {
   class HelloWorldService(system: ActorSystem[_]) {
     import system.executionContext
 
-    // registration at startup
     private val sharding = ClusterSharding(system)
 
+    // registration at startup
     sharding.init(
-      Entity(
-        typeKey = HelloWorld.entityTypeKey,
-        createBehavior = entityContext => HelloWorld.persistentEntity(entityContext.entityId)))
+      Entity(typeKey = HelloWorld.TypeKey, createBehavior = entityContext => HelloWorld(entityContext.entityId)))
 
     private implicit val askTimeout: Timeout = Timeout(5.seconds)
 
     def greet(worldId: String, whom: String): Future[Int] = {
-      val entityRef = sharding.entityRefFor(HelloWorld.entityTypeKey, worldId)
+      val entityRef = sharding.entityRefFor(HelloWorld.TypeKey, worldId)
       val greeting = entityRef ? HelloWorld.Greet(whom)
       greeting.map(_.numberOfPeople)
     }
@@ -77,13 +76,12 @@ object HelloWorldPersistentEntityExample {
       state.add(evt.whom)
     }
 
-    val entityTypeKey: EntityTypeKey[Command] =
+    val TypeKey: EntityTypeKey[Command] =
       EntityTypeKey[Command]("HelloWorld")
 
-    def persistentEntity(entityId: String): Behavior[Command] =
-      EventSourcedEntity(
-        entityTypeKey = entityTypeKey,
-        entityId = entityId,
+    def apply(entityId: String): Behavior[Command] =
+      EventSourcedBehavior(
+        TypeKey.persistenceIdFrom(entityId),
         emptyState = KnownPeople(Set.empty),
         commandHandler,
         eventHandler)

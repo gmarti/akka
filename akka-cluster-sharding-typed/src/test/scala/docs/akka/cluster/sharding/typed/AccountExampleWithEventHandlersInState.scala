@@ -6,10 +6,12 @@ package docs.akka.cluster.sharding.typed
 
 import akka.actor.typed.ActorRef
 import akka.actor.typed.Behavior
+import akka.cluster.sharding.typed.scaladsl.EntityContext
 import akka.cluster.sharding.typed.scaladsl.EntityTypeKey
 import akka.cluster.sharding.typed.scaladsl.EventSourcedEntity
 import akka.persistence.typed.ExpectingReply
 import akka.persistence.typed.scaladsl.Effect
+import akka.persistence.typed.scaladsl.EventSourcedBehavior
 import akka.persistence.typed.scaladsl.ReplyEffect
 import akka.serialization.jackson.CborSerializable
 
@@ -96,8 +98,8 @@ object AccountExampleWithEventHandlersInState {
     // to generate the stub with types for the command and event handlers.
 
     //#withEnforcedReplies
-    def apply(accountNumber: String): Behavior[Command[_]] = {
-      EventSourcedEntity.withEnforcedReplies(TypeKey, accountNumber, EmptyAccount, commandHandler, eventHandler)
+    def apply(entityContext: EntityContext): EventSourcedBehavior[Command[_], Event, Account] = {
+      EventSourcedBehavior.withEnforcedReplies(entityContext.persistenceId, EmptyAccount, commandHandler, eventHandler)
     }
     //#withEnforcedReplies
 
@@ -167,4 +169,50 @@ object AccountExampleWithEventHandlersInState {
   }
   //#account-entity
 
+}
+
+import AccountExampleWithEventHandlersInState.AccountEntity
+import akka.cluster.sharding.typed.scaladsl.ClusterSharding
+import akka.cluster.sharding.typed.scaladsl.Entity
+import akka.cluster.sharding.typed.scaladsl.EntityRef
+import akka.util.Timeout
+import scala.concurrent.duration._
+import scala.concurrent.Future
+
+trait AccountComponent {
+
+  // DI of ClusterSharding
+  protected def clusterSharding: ClusterSharding
+
+  private val TypeKey: EntityTypeKey[AccountEntity.Command[_]] =
+    EntityTypeKey[AccountEntity.Command[_]]("Account")
+
+  // eager initialization
+  clusterSharding.init(
+    Entity(
+      TypeKey,
+      entityContext =>
+        AccountEntity(entityContext).withTagger(
+          TaggingUtility.partitionEntities(entityContext.entityId, numberOfPartitions = 10))))
+
+  def enityRefFor(accountNumber: String): EntityRef[AccountEntity.Command[_]] =
+    clusterSharding.entityRefFor(TypeKey, accountNumber)
+
+}
+
+abstract class UsageFromService {
+  // DI
+  val entityRefProvider: AccountComponent
+
+  private implicit val askTimeout: Timeout = 3.seconds
+
+  def someDepositServiceCall(accountNumber: String): Unit = {
+    val result: Future[AccountEntity.OperationResult] =
+      entityRefProvider.enityRefFor(accountNumber).ask(AccountEntity.Deposit(100, _))
+  }
+}
+
+object TaggingUtility {
+  def partitionEntities[Event](entityId: String, numberOfPartitions: Int): Event => Set[String] =
+    _ => Set(math.abs(entityId.hashCode % numberOfPartitions).toString)
 }

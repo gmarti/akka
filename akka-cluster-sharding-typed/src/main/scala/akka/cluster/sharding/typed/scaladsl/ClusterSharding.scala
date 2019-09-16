@@ -292,7 +292,9 @@ final class Entity[M, E] private[akka] (
 /**
  * Parameter to [[Entity.apply]]
  */
-final class EntityContext(val entityId: String, val shard: ActorRef[ClusterSharding.ShardCommand])
+final class EntityContext(val entityId: String, val shard: ActorRef[ClusterSharding.ShardCommand]) {
+  def persistenceId: PersistenceId = ??? // FIXME EntityTypeKey.persistenceIdFrom(entityId)
+}
 
 /** Allows starting a specific Sharded Entity by its entity identifier */
 object StartEntity {
